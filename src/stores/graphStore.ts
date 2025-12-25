@@ -1,7 +1,11 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
+import { enableMapSet } from 'immer'
 import { nanoid } from 'nanoid'
 import type { GraphNode, GraphEdge, GraphSnapshot, Viewport, Clipboard } from '@/types/graph'
+
+// Enable Immer support for Map and Set
+enableMapSet()
 
 interface GraphState {
   nodes: Map<string, GraphNode>
