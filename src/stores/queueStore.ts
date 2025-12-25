@@ -1,99 +1,124 @@
+// src/stores/queueStore.ts
+// Date: December 25, 2025
+// Version: v1
+
 import { create } from 'zustand'
-import { immer } from 'zustand/middleware/immer'
+import { nanoid } from 'nanoid'
 import type { QueueItem, QueueProgress } from '@/types/queue'
 
 interface QueueState {
-  pending: QueueItem[]
-  running: QueueItem | null
-  history: QueueItem[]
-  progress: QueueProgress | null
+	pending: QueueItem[]
+	running: QueueItem | null
+	history: QueueItem[]
+	progress: QueueProgress | null
 
-  // Actions
-  addToQueue: (item: QueueItem) => void
-  removeFromQueue: (id: string) => void
-  setRunning: (item: QueueItem | null) => void
-  completeRunning: (outputs?: QueueItem['outputs'], error?: string) => void
-  setProgress: (progress: QueueProgress | null) => void
-  clearHistory: () => void
-  clearPending: () => void
+	// Actions
+	addToQueue: (promptId: string, workflow: unknown) => string
+	removeFromQueue: (id: string) => void
+	startNext: () => QueueItem | null
+	completeRunning: (outputs?: Record<string, unknown>) => void
+	failRunning: (error: string) => void
+	setProgress: (progress: QueueProgress | null) => void
+	clearHistory: () => void
+	clearPending: () => void
 }
 
-const MAX_HISTORY = 100
+const MAX_HISTORY = 50
 
-export const useQueueStore = create<QueueState>()(
-  immer((set) => ({
-    pending: [],
-    running: null,
-    history: [],
-    progress: null,
+export const useQueueStore = create<QueueState>((set, get) => ({
+	pending: [],
+	running: null,
+	history: [],
+	progress: null,
 
-    addToQueue: (item) => {
-      set((state) => {
-        state.pending.push(item)
-      })
-    },
+	addToQueue: (promptId, workflow) => {
+		const id = nanoid()
+		const item: QueueItem = {
+			id,
+			promptId,
+			workflow,
+			status: 'pending',
+			createdAt: new Date()
+		}
 
-    removeFromQueue: (id) => {
-      set((state) => {
-        const index = state.pending.findIndex((item) => item.id === id)
-        if (index !== -1) {
-          state.pending.splice(index, 1)
-        }
-      })
-    },
+		set((state) => ({
+			pending: [...state.pending, item]
+		}))
 
-    setRunning: (item) => {
-      set((state) => {
-        if (item) {
-          // Remove from pending if present
-          const index = state.pending.findIndex((p) => p.id === item.id)
-          if (index !== -1) {
-            state.pending.splice(index, 1)
-          }
-          state.running = { ...item, status: 'running', startedAt: new Date() }
-        } else {
-          state.running = null
-        }
-        state.progress = null
-      })
-    },
+		return id
+	},
 
-    completeRunning: (outputs, error) => {
-      set((state) => {
-        if (state.running) {
-          const completedItem: QueueItem = {
-            ...state.running,
-            status: error ? 'failed' : 'completed',
-            completedAt: new Date(),
-            outputs,
-            error,
-          }
-          state.history.unshift(completedItem)
-          if (state.history.length > MAX_HISTORY) {
-            state.history.pop()
-          }
-          state.running = null
-          state.progress = null
-        }
-      })
-    },
+	removeFromQueue: (id) => {
+		set((state) => ({
+			pending: state.pending.filter((item) => item.id !== id)
+		}))
+	},
 
-    setProgress: (progress) => {
-      set((state) => {
-        state.progress = progress
-      })
-    },
+	startNext: () => {
+		const { pending, running } = get()
+		if (running || pending.length === 0) return null
 
-    clearHistory: () => {
-      set((state) => {
-        state.history = []
-      })
-    },
+		const [next, ...rest] = pending
+		const runningItem: QueueItem = {
+			...next,
+			status: 'running',
+			startedAt: new Date()
+		}
 
-    clearPending: () => {
-      set((state) => {
-        state.pending = []
-      })
-    },
-  }))
-)
+		set({
+			pending: rest,
+			running: runningItem,
+			progress: null
+		})
+
+		return runningItem
+	},
+
+	completeRunning: (outputs) => {
+		const { running, history } = get()
+		if (!running) return
+
+		const completedItem: QueueItem = {
+			...running,
+			status: 'completed',
+			completedAt: new Date(),
+			outputs
+		}
+
+		set({
+			running: null,
+			progress: null,
+			history: [completedItem, ...history].slice(0, MAX_HISTORY)
+		})
+	},
+
+	failRunning: (error) => {
+		const { running, history } = get()
+		if (!running) return
+
+		const failedItem: QueueItem = {
+			...running,
+			status: 'failed',
+			completedAt: new Date(),
+			error
+		}
+
+		set({
+			running: null,
+			progress: null,
+			history: [failedItem, ...history].slice(0, MAX_HISTORY)
+		})
+	},
+
+	setProgress: (progress) => {
+		set({ progress })
+	},
+
+	clearHistory: () => {
+		set({ history: [] })
+	},
+
+	clearPending: () => {
+		set({ pending: [] })
+	}
+}))

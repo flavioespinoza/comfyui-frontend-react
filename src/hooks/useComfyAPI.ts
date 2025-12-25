@@ -1,147 +1,204 @@
+// src/hooks/useComfyAPI.ts
+// Date: December 25, 2025
+// Version: v1
+
 'use client'
 
-// API connection and WebSocket hook
+import { useCallback, useRef, useState, useEffect } from 'react'
+import { useQueueStore } from '@/stores/queueStore'
+import { useToast } from '@/components/ui/Toast'
+import { graphToWorkflow } from '@/lib/utils/graphConverters'
+import { useGraphStore } from '@/stores/graphStore'
+import type { ComfyUIMessage, NodeDefinition } from '@/types/comfy'
 
-import { useEffect, useCallback, useRef, useState } from 'react'
-import { getComfyClient, type ComfyClientEvents } from '@/lib/api'
-import { useQueueStore } from '@/stores'
-import type { QueueProgress } from '@/types/queue'
-
-interface UseComfyAPIOptions {
-  baseUrl?: string
-  autoConnect?: boolean
-}
+const API_BASE = process.env.NEXT_PUBLIC_COMFY_API_URL || 'http://localhost:8188'
 
 interface UseComfyAPIReturn {
-  isConnected: boolean
-  isConnecting: boolean
-  error: string | null
-  connect: () => void
-  disconnect: () => void
-  queuePrompt: (workflow: Record<string, unknown>) => Promise<string | null>
-  interrupt: () => Promise<void>
-  clearQueue: () => Promise<void>
-  getObjectInfo: () => Promise<Record<string, unknown>>
+	isConnected: boolean
+	isConnecting: boolean
+	nodeDefinitions: Record<string, NodeDefinition>
+	connect: () => void
+	disconnect: () => void
+	queuePrompt: () => Promise<string | null>
+	interrupt: () => Promise<void>
+	fetchNodeDefinitions: () => Promise<void>
 }
 
-export function useComfyAPI(options: UseComfyAPIOptions = {}): UseComfyAPIReturn {
-  const { baseUrl = 'http://127.0.0.1:8188', autoConnect = true } = options
+export function useComfyAPI(): UseComfyAPIReturn {
+	const [isConnected, setIsConnected] = useState(false)
+	const [isConnecting, setIsConnecting] = useState(false)
+	const [nodeDefinitions, setNodeDefinitions] = useState<Record<string, NodeDefinition>>({})
 
-  const [isConnected, setIsConnected] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+	const wsRef = useRef<WebSocket | null>(null)
+	const clientIdRef = useRef<string>(crypto.randomUUID())
+	const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  const clientRef = useRef(getComfyClient({ baseUrl }))
-  const { setProgress, setRunning, completeRunning } = useQueueStore()
+	const { addToast } = useToast()
+	const { setProgress, completeRunning, failRunning, addToQueue, startNext } = useQueueStore()
+	const { nodes, edges } = useGraphStore()
 
-  const handleProgress = useCallback(
-    (progress: QueueProgress) => {
-      setProgress(progress)
-    },
-    [setProgress]
-  )
+	const handleMessage = useCallback(
+		(event: MessageEvent) => {
+			try {
+				const message: ComfyUIMessage = JSON.parse(event.data)
 
-  const handleExecutionComplete = useCallback(
-    (promptId: string) => {
-      completeRunning()
-    },
-    [completeRunning]
-  )
+				switch (message.type) {
+					case 'progress':
+						setProgress({
+							nodeId: message.data.node,
+							nodeLabel: message.data.node,
+							value: message.data.value,
+							max: message.data.max
+						})
+						break
 
-  const handleExecutionError = useCallback(
-    (promptId: string, errorMessage: string) => {
-      completeRunning(undefined, errorMessage)
-    },
-    [completeRunning]
-  )
+					case 'executing':
+						if (message.data.node === null) {
+							// Execution complete
+							completeRunning()
+							// Start next item if any
+							startNext()
+						}
+						break
 
-  const handleConnected = useCallback(() => {
-    setIsConnected(true)
-    setIsConnecting(false)
-    setError(null)
-  }, [])
+					case 'executed':
+						// Node execution completed
+						break
 
-  const handleDisconnected = useCallback(() => {
-    setIsConnected(false)
-  }, [])
+					case 'execution_error':
+						failRunning(message.data.exception_message)
+						addToast({
+							type: 'error',
+							message: `Execution failed: ${message.data.exception_message}`
+						})
+						break
+				}
+			} catch (err) {
+				console.error('Failed to parse WebSocket message:', err)
+			}
+		},
+		[setProgress, completeRunning, failRunning, startNext, addToast]
+	)
 
-  const connect = useCallback(() => {
-    setIsConnecting(true)
-    setError(null)
+	const connect = useCallback(() => {
+		if (wsRef.current?.readyState === WebSocket.OPEN) return
 
-    const events: ComfyClientEvents = {
-      onProgress: handleProgress,
-      onExecutionComplete: handleExecutionComplete,
-      onExecutionError: handleExecutionError,
-      onConnected: handleConnected,
-      onDisconnected: handleDisconnected,
-    }
+		setIsConnecting(true)
 
-    clientRef.current.connect(events)
-  }, [handleProgress, handleExecutionComplete, handleExecutionError, handleConnected, handleDisconnected])
+		const wsUrl = `${API_BASE.replace('http', 'ws')}/ws?clientId=${clientIdRef.current}`
+		const ws = new WebSocket(wsUrl)
 
-  const disconnect = useCallback(() => {
-    clientRef.current.disconnect()
-    setIsConnected(false)
-  }, [])
+		ws.onopen = () => {
+			setIsConnected(true)
+			setIsConnecting(false)
+			addToast({ type: 'success', message: 'Connected to ComfyUI' })
+		}
 
-  const queuePrompt = useCallback(
-    async (workflow: Record<string, unknown>): Promise<string | null> => {
-      try {
-        const result = await clientRef.current.queuePrompt(workflow)
-        return result.prompt_id
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to queue prompt')
-        return null
-      }
-    },
-    []
-  )
+		ws.onclose = () => {
+			setIsConnected(false)
+			setIsConnecting(false)
 
-  const interrupt = useCallback(async () => {
-    try {
-      await clientRef.current.interrupt()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to interrupt')
-    }
-  }, [])
+			// Attempt reconnection after 3 seconds
+			reconnectTimeoutRef.current = setTimeout(() => {
+				if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+					connect()
+				}
+			}, 3000)
+		}
 
-  const clearQueue = useCallback(async () => {
-    try {
-      await clientRef.current.clearQueue()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to clear queue')
-    }
-  }, [])
+		ws.onerror = () => {
+			setIsConnecting(false)
+			addToast({ type: 'error', message: 'Failed to connect to ComfyUI' })
+		}
 
-  const getObjectInfo = useCallback(async () => {
-    try {
-      return await clientRef.current.getObjectInfo()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to get object info')
-      return {}
-    }
-  }, [])
+		ws.onmessage = handleMessage
 
-  useEffect(() => {
-    if (autoConnect) {
-      connect()
-    }
+		wsRef.current = ws
+	}, [handleMessage, addToast])
 
-    return () => {
-      disconnect()
-    }
-  }, [autoConnect, connect, disconnect])
+	const disconnect = useCallback(() => {
+		if (reconnectTimeoutRef.current) {
+			clearTimeout(reconnectTimeoutRef.current)
+		}
 
-  return {
-    isConnected,
-    isConnecting,
-    error,
-    connect,
-    disconnect,
-    queuePrompt,
-    interrupt,
-    clearQueue,
-    getObjectInfo,
-  }
+		if (wsRef.current) {
+			wsRef.current.close()
+			wsRef.current = null
+		}
+
+		setIsConnected(false)
+	}, [])
+
+	const queuePrompt = useCallback(async (): Promise<string | null> => {
+		try {
+			const workflow = graphToWorkflow(nodes, edges)
+
+			const response = await fetch(`${API_BASE}/prompt`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					prompt: workflow,
+					client_id: clientIdRef.current
+				})
+			})
+
+			if (!response.ok) {
+				const error = await response.json()
+				throw new Error(error.error || 'Failed to queue prompt')
+			}
+
+			const data = await response.json()
+			const promptId = data.prompt_id
+
+			// Add to queue store
+			addToQueue(promptId, workflow)
+			startNext()
+
+			addToast({ type: 'info', message: 'Prompt queued' })
+			return promptId
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Failed to queue prompt'
+			addToast({ type: 'error', message })
+			return null
+		}
+	}, [nodes, edges, addToQueue, startNext, addToast])
+
+	const interrupt = useCallback(async () => {
+		try {
+			await fetch(`${API_BASE}/interrupt`, { method: 'POST' })
+			addToast({ type: 'warning', message: 'Execution interrupted' })
+		} catch (err) {
+			addToast({ type: 'error', message: 'Failed to interrupt' })
+		}
+	}, [addToast])
+
+	const fetchNodeDefinitions = useCallback(async () => {
+		try {
+			const response = await fetch(`${API_BASE}/object_info`)
+			if (!response.ok) throw new Error('Failed to fetch node definitions')
+
+			const data = await response.json()
+			setNodeDefinitions(data)
+		} catch (err) {
+			console.error('Failed to fetch node definitions:', err)
+		}
+	}, [])
+
+	// Cleanup on unmount
+	useEffect(() => {
+		return () => {
+			disconnect()
+		}
+	}, [disconnect])
+
+	return {
+		isConnected,
+		isConnecting,
+		nodeDefinitions,
+		connect,
+		disconnect,
+		queuePrompt,
+		interrupt,
+		fetchNodeDefinitions
+	}
 }

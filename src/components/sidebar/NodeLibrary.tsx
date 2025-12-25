@@ -1,124 +1,161 @@
+// src/components/sidebar/NodeLibrary.tsx
+// Date: December 25, 2025
+// Version: v1
+
 'use client'
 
-// Node search and drag-drop
+import { useState, useMemo, useEffect } from 'react'
+import { Search, ChevronRight, ChevronDown } from 'lucide-react'
+import { useComfyAPI } from '@/hooks/useComfyAPI'
+import { nodeDefToGraphNode } from '@/lib/utils/graphConverters'
+import type { NodeDefinition } from '@/types/comfy'
 
-import { useState, useMemo } from 'react'
-import { Search } from 'lucide-react'
-
-interface NodeDefinition {
-  type: string
-  label: string
-  category: string
-  description?: string
+interface NodeItem {
+	type: string
+	label: string
+	category: string
+	definition: NodeDefinition
 }
 
-// Placeholder node definitions - will be populated from ComfyUI API
-const defaultNodes: NodeDefinition[] = [
-  { type: 'KSampler', label: 'KSampler', category: 'sampling', description: 'Main sampling node' },
-  { type: 'CheckpointLoaderSimple', label: 'Load Checkpoint', category: 'loaders', description: 'Load a checkpoint model' },
-  { type: 'CLIPTextEncode', label: 'CLIP Text Encode', category: 'conditioning', description: 'Encode text with CLIP' },
-  { type: 'VAEDecode', label: 'VAE Decode', category: 'latent', description: 'Decode latent to image' },
-  { type: 'VAEEncode', label: 'VAE Encode', category: 'latent', description: 'Encode image to latent' },
-  { type: 'EmptyLatentImage', label: 'Empty Latent Image', category: 'latent', description: 'Create empty latent' },
-  { type: 'SaveImage', label: 'Save Image', category: 'image', description: 'Save image to disk' },
-  { type: 'LoadImage', label: 'Load Image', category: 'image', description: 'Load image from disk' },
-  { type: 'PreviewImage', label: 'Preview Image', category: 'image', description: 'Preview image in UI' },
-]
-
 export function NodeLibrary() {
-  const [search, setSearch] = useState('')
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['sampling', 'loaders']))
+	const { nodeDefinitions, fetchNodeDefinitions, isConnected } = useComfyAPI()
+	const [search, setSearch] = useState('')
+	const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
+		new Set(['sampling', 'loaders', 'conditioning'])
+	)
 
-  const filteredNodes = useMemo(() => {
-    if (!search) return defaultNodes
-    const searchLower = search.toLowerCase()
-    return defaultNodes.filter(
-      (node) =>
-        node.label.toLowerCase().includes(searchLower) ||
-        node.type.toLowerCase().includes(searchLower) ||
-        node.category.toLowerCase().includes(searchLower)
-    )
-  }, [search])
+	// Fetch node definitions when connected
+	useEffect(() => {
+		if (isConnected) {
+			fetchNodeDefinitions()
+		}
+	}, [isConnected, fetchNodeDefinitions])
 
-  const nodesByCategory = useMemo(() => {
-    const grouped: Record<string, NodeDefinition[]> = {}
-    filteredNodes.forEach((node) => {
-      if (!grouped[node.category]) {
-        grouped[node.category] = []
-      }
-      grouped[node.category].push(node)
-    })
-    return grouped
-  }, [filteredNodes])
+	// Convert node definitions to list format
+	const nodeList = useMemo<NodeItem[]>(() => {
+		return Object.entries(nodeDefinitions).map(([type, def]) => ({
+			type,
+			label: def.display_name || type,
+			category: def.category.split('/')[0] || 'uncategorized',
+			definition: def
+		}))
+	}, [nodeDefinitions])
 
-  const toggleCategory = (category: string) => {
-    setExpandedCategories((prev) => {
-      const next = new Set(prev)
-      if (next.has(category)) {
-        next.delete(category)
-      } else {
-        next.add(category)
-      }
-      return next
-    })
-  }
+	// Filter nodes by search
+	const filteredNodes = useMemo(() => {
+		if (!search) return nodeList
+		const searchLower = search.toLowerCase()
+		return nodeList.filter(
+			(node) =>
+				node.label.toLowerCase().includes(searchLower) ||
+				node.type.toLowerCase().includes(searchLower) ||
+				node.category.toLowerCase().includes(searchLower)
+		)
+	}, [nodeList, search])
 
-  const handleDragStart = (event: React.DragEvent, nodeType: string) => {
-    event.dataTransfer.setData('application/comfynode', nodeType)
-    event.dataTransfer.effectAllowed = 'move'
-  }
+	// Group nodes by category
+	const nodesByCategory = useMemo(() => {
+		const grouped: Record<string, NodeItem[]> = {}
+		filteredNodes.forEach((node) => {
+			if (!grouped[node.category]) {
+				grouped[node.category] = []
+			}
+			grouped[node.category].push(node)
+		})
+		// Sort categories alphabetically
+		return Object.fromEntries(
+			Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b))
+		)
+	}, [filteredNodes])
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* Search input */}
-      <div className="p-3 border-b">
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search nodes..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 text-sm rounded border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-        </div>
-      </div>
+	const toggleCategory = (category: string) => {
+		setExpandedCategories((prev) => {
+			const next = new Set(prev)
+			if (next.has(category)) {
+				next.delete(category)
+			} else {
+				next.add(category)
+			}
+			return next
+		})
+	}
 
-      {/* Node list */}
-      <div className="flex-1 overflow-y-auto">
-        {Object.entries(nodesByCategory).map(([category, nodes]) => (
-          <div key={category} className="border-b last:border-b-0">
-            <button
-              onClick={() => toggleCategory(category)}
-              className="w-full px-3 py-2 flex items-center justify-between text-sm font-medium hover:bg-muted/50"
-            >
-              <span className="capitalize">{category}</span>
-              <span className="text-xs text-muted-foreground">
-                {nodes.length}
-              </span>
-            </button>
-            {expandedCategories.has(category) && (
-              <div className="pb-2">
-                {nodes.map((node) => (
-                  <div
-                    key={node.type}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, node.type)}
-                    className="mx-2 px-2 py-1.5 text-sm rounded cursor-grab hover:bg-muted active:cursor-grabbing"
-                  >
-                    <div className="font-medium">{node.label}</div>
-                    {node.description && (
-                      <div className="text-xs text-muted-foreground">
-                        {node.description}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+	const handleDragStart = (event: React.DragEvent, node: NodeItem) => {
+		event.dataTransfer.setData('application/comfynode', node.type)
+
+		// Create node data for drop
+		const graphNode = nodeDefToGraphNode(node.definition, { x: 0, y: 0 })
+		event.dataTransfer.setData(
+			'application/comfynode-data',
+			JSON.stringify(graphNode.data)
+		)
+		event.dataTransfer.effectAllowed = 'move'
+	}
+
+	return (
+		<div className="flex flex-col h-full">
+			{/* Search input */}
+			<div className="p-3 border-b border-comfy-border">
+				<div className="relative">
+					<Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-comfy-muted" />
+					<input
+						type="text"
+						placeholder="Search nodes..."
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						className="w-full pl-9 pr-3 py-2 text-sm rounded border bg-comfy-bg border-comfy-border text-comfy-text placeholder:text-comfy-muted focus:outline-none focus:ring-1 focus:ring-comfy-accent focus:border-comfy-accent"
+					/>
+				</div>
+			</div>
+
+			{/* Node list */}
+			<div className="flex-1 overflow-y-auto">
+				{Object.keys(nodesByCategory).length === 0 ? (
+					<div className="p-4 text-sm text-comfy-muted text-center">
+						{isConnected
+							? 'Loading nodes...'
+							: 'Connect to ComfyUI to load nodes'}
+					</div>
+				) : (
+					Object.entries(nodesByCategory).map(([category, nodes]) => (
+						<div key={category} className="border-b border-comfy-border last:border-b-0">
+							<button
+								onClick={() => toggleCategory(category)}
+								className="w-full px-3 py-2 flex items-center gap-2 text-sm font-medium text-comfy-text hover:bg-comfy-bg/50"
+							>
+								{expandedCategories.has(category) ? (
+									<ChevronDown className="w-4 h-4 text-comfy-muted" />
+								) : (
+									<ChevronRight className="w-4 h-4 text-comfy-muted" />
+								)}
+								<span className="capitalize flex-1 text-left">{category}</span>
+								<span className="text-xs text-comfy-muted">
+									{nodes.length}
+								</span>
+							</button>
+							{expandedCategories.has(category) && (
+								<div className="pb-2">
+									{nodes.map((node) => (
+										<div
+											key={node.type}
+											draggable
+											onDragStart={(e) => handleDragStart(e, node)}
+											className="mx-2 px-3 py-2 text-sm rounded cursor-grab hover:bg-comfy-bg active:cursor-grabbing transition-colors"
+										>
+											<div className="font-medium text-comfy-text">
+												{node.label}
+											</div>
+											<div className="text-xs text-comfy-muted truncate">
+												{node.type}
+											</div>
+										</div>
+									))}
+								</div>
+							)}
+						</div>
+					))
+				)}
+			</div>
+		</div>
+	)
 }

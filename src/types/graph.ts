@@ -1,81 +1,96 @@
-// Graph, node, edge, widget types
+// src/types/graph.ts
+// Date: December 25, 2025
+// Version: v1
 
 export interface GraphNode {
-  id: string
-  type: string
-  position: { x: number; y: number }
-  data: NodeData
-  width?: number
-  height?: number
+	id: string
+	type: string
+	position: { x: number; y: number }
+	data: ComfyNodeData
+	selected?: boolean
+	dragging?: boolean
+	width?: number
+	height?: number
 }
 
-export interface NodeData {
-  title: string
-  inputs: NodeInput[]
-  outputs: NodeOutput[]
-  widgets: Widget[]
-  properties: Record<string, unknown>
+export interface ComfyNodeData {
+	label: string
+	type: string
+	widgets: WidgetConfig[]
+	inputs: NodeInput[]
+	outputs: NodeOutput[]
 }
 
 export interface NodeInput {
-  name: string
-  type: string
-  link: string | null
+	id: string
+	label: string
+	type: string
+	required?: boolean
 }
 
 export interface NodeOutput {
-  name: string
-  type: string
-  links: string[]
+	id: string
+	label: string
+	type: string
 }
 
-export interface Widget {
-  name: string
-  type: WidgetType
-  value: unknown
-  options?: WidgetOptions
+export interface WidgetConfig {
+	id: string
+	label: string
+	type: WidgetType
+	value: unknown
+	options?: string[]
+	min?: number
+	max?: number
+	step?: number
 }
 
 export type WidgetType =
-  | 'number'
-  | 'text'
-  | 'select'
-  | 'slider'
-  | 'toggle'
-  | 'color'
-  | 'image'
-  | 'combo'
+	| 'number'
+	| 'text'
+	| 'textarea'
+	| 'select'
+	| 'slider'
+	| 'checkbox'
+	| 'toggle'
+	| 'color'
+	| 'image'
+	| 'combo'
 
 export interface WidgetOptions {
-  min?: number
-  max?: number
-  step?: number
-  choices?: string[]
-  placeholder?: string
-  multiline?: boolean
+	min?: number
+	max?: number
+	step?: number
+	choices?: string[]
+	placeholder?: string
+	multiline?: boolean
 }
 
 export interface GraphEdge {
-  id: string
-  source: string
-  sourceHandle: string
-  target: string
-  targetHandle: string
-  type?: string
+	id: string
+	source: string
+	sourceHandle: string
+	target: string
+	targetHandle: string
+	type?: string
+	animated?: boolean
+	data?: {
+		type?: string
+	}
 }
 
 export interface GraphSnapshot {
-  nodes: Map<string, GraphNode>
-  edges: Map<string, GraphEdge>
+	nodes: Map<string, GraphNode>
+	edges: Map<string, GraphEdge>
 }
 
 export interface Viewport {
-  x: number
-  y: number
-  zoom: number
+	x: number
+	y: number
+	zoom: number
 }
 
 export interface Clipboard {
-  nodes: GraphNode[]
-  edges: GraphEdge[]
+	nodes: GraphNode[]
+	edges: GraphEdge[]
 }

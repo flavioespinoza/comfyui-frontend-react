@@ -1,87 +1,124 @@
-'use client'
+// src/components/nodes/ComfyNode.tsx
+// Date: December 25, 2025
+// Version: v1
 
-// Custom node component
+'use client'
 
 import { memo, useCallback } from 'react'
 import { Handle, Position, type NodeProps } from 'reactflow'
-import { useGraphStore } from '@/stores'
+import { useGraphStore } from '@/stores/graphStore'
 import { WidgetRenderer } from './WidgetRenderer'
-import type { NodeData } from '@/types/graph'
+import type { ComfyNodeData } from '@/types/graph'
 
-function ComfyNodeComponent({ id, data, selected }: NodeProps<NodeData>) {
-  const { updateNode } = useGraphStore()
+// Color mapping for different data types
+const TYPE_COLORS: Record<string, string> = {
+	MODEL: '#8b5cf6',
+	CLIP: '#f59e0b',
+	VAE: '#ef4444',
+	CONDITIONING: '#f97316',
+	LATENT: '#ec4899',
+	IMAGE: '#3b82f6',
+	MASK: '#22c55e',
+	CONTROL_NET: '#06b6d4',
+	DEFAULT: '#6b7280'
+}
 
-  const handleWidgetChange = useCallback(
-    (widgetName: string, value: unknown) => {
-      updateNode(id, {
-        data: {
-          ...data,
-          widgets: data.widgets.map((w) =>
-            w.name === widgetName ? { ...w, value } : w
-          ),
-        },
-      })
-    },
-    [id, data, updateNode]
-  )
+function getTypeColor(type: string): string {
+	return TYPE_COLORS[type] || TYPE_COLORS.DEFAULT
+}
 
-  return (
-    <div
-      className={`
-        min-w-[200px] rounded-lg border bg-background shadow-lg
-        ${selected ? 'ring-2 ring-primary border-primary' : 'border-border'}
-      `}
-    >
-      {/* Header */}
-      <div className="px-3 py-2 border-b bg-muted/50 rounded-t-lg">
-        <h3 className="font-medium text-sm truncate">{data.title}</h3>
-      </div>
+function ComfyNodeComponent({ id, data, selected }: NodeProps<ComfyNodeData>) {
+	const { updateNode } = useGraphStore()
 
-      {/* Content */}
-      <div className="p-2 space-y-2">
-        {/* Inputs */}
-        {data.inputs.map((input, index) => (
-          <div key={input.name} className="relative flex items-center">
-            <Handle
-              type="target"
-              position={Position.Left}
-              id={input.name}
-              className="!w-3 !h-3 !bg-blue-500 !border-2 !border-background"
-              style={{ top: 'auto', left: -6 }}
-            />
-            <span className="text-xs text-muted-foreground pl-2">
-              {input.name}
-            </span>
-          </div>
-        ))}
+	const handleWidgetChange = useCallback(
+		(widgetId: string, value: unknown) => {
+			updateNode(id, {
+				data: {
+					...data,
+					widgets: data.widgets.map((w) =>
+						w.id === widgetId ? { ...w, value } : w
+					)
+				}
+			})
+		},
+		[id, data, updateNode]
+	)
 
-        {/* Widgets */}
-        {data.widgets.map((widget) => (
-          <WidgetRenderer
-            key={widget.name}
-            widget={widget}
-            onChange={(value) => handleWidgetChange(widget.name, value)}
-          />
-        ))}
+	return (
+		<div
+			className={`
+				min-w-[220px] rounded-lg border bg-comfy-surface shadow-xl
+				${selected ? 'ring-2 ring-comfy-accent border-comfy-accent' : 'border-comfy-border'}
+			`}
+		>
+			{/* Header */}
+			<div className="px-3 py-2 border-b border-comfy-border bg-comfy-bg/50 rounded-t-lg">
+				<h3 className="font-medium text-sm text-comfy-text truncate">
+					{data.label}
+				</h3>
+				<span className="text-xs text-comfy-muted">{data.type}</span>
+			</div>
 
-        {/* Outputs */}
-        {data.outputs.map((output, index) => (
-          <div key={output.name} className="relative flex items-center justify-end">
-            <span className="text-xs text-muted-foreground pr-2">
-              {output.name}
-            </span>
-            <Handle
-              type="source"
-              position={Position.Right}
-              id={output.name}
-              className="!w-3 !h-3 !bg-green-500 !border-2 !border-background"
-              style={{ top: 'auto', right: -6 }}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+			{/* Content */}
+			<div className="p-2 space-y-1">
+				{/* Inputs */}
+				{data.inputs.map((input) => (
+					<div key={input.id} className="relative flex items-center py-1">
+						<Handle
+							type="target"
+							position={Position.Left}
+							id={input.id}
+							style={{
+								background: getTypeColor(input.type),
+								width: 12,
+								height: 12,
+								left: -6,
+								border: '2px solid var(--comfy-surface)'
+							}}
+						/>
+						<span className="text-xs text-comfy-muted pl-3">
+							{input.label}
+							{input.required && <span className="text-comfy-accent ml-1">*</span>}
+						</span>
+					</div>
+				))}
+
+				{/* Widgets */}
+				{data.widgets.length > 0 && (
+					<div className="space-y-2 py-2 border-t border-comfy-border mt-2">
+						{data.widgets.map((widget) => (
+							<WidgetRenderer
+								key={widget.id}
+								widget={widget}
+								onChange={(value) => handleWidgetChange(widget.id, value)}
+							/>
+						))}
+					</div>
+				)}
+
+				{/* Outputs */}
+				{data.outputs.map((output) => (
+					<div key={output.id} className="relative flex items-center justify-end py-1">
+						<span className="text-xs text-comfy-muted pr-3">
+							{output.label}
+						</span>
+						<Handle
+							type="source"
+							position={Position.Right}
+							id={output.id}
+							style={{
+								background: getTypeColor(output.type),
+								width: 12,
+								height: 12,
+								right: -6,
+								border: '2px solid var(--comfy-surface)'
+							}}
+						/>
+					</div>
+				))}
+			</div>
+		</div>
+	)
 }
 
 export const ComfyNode = memo(ComfyNodeComponent)
