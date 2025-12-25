@@ -1,6 +1,6 @@
 // src/hooks/useComfyAPI.ts
 // Date: December 25, 2025
-// Version: v1
+// Version: v2
 
 'use client'
 
@@ -9,29 +9,56 @@ import { useQueueStore } from '@/stores/queueStore'
 import { useToast } from '@/components/ui/Toast'
 import { graphToWorkflow } from '@/lib/utils/graphConverters'
 import { useGraphStore } from '@/stores/graphStore'
-import type { ComfyUIMessage, NodeDefinition } from '@/types/comfy'
+import type { NodeDefinition } from '@/types/comfy'
+import type { ImageInfo, SystemStats, HistoryItem } from '@/lib/api/comfyClient'
 
 const API_BASE = process.env.NEXT_PUBLIC_COMFY_API_URL || 'http://localhost:8188'
 
 interface UseComfyAPIReturn {
+	// Connection state
 	isConnected: boolean
 	isConnecting: boolean
 	nodeDefinitions: Record<string, NodeDefinition>
+	previewImage: string | null
+
+	// Connection methods
 	connect: () => void
 	disconnect: () => void
+
+	// Workflow methods
 	queuePrompt: () => Promise<string | null>
 	interrupt: () => Promise<void>
 	fetchNodeDefinitions: () => Promise<void>
+
+	// Queue methods
+	getQueue: () => Promise<{ queue_running: unknown[]; queue_pending: unknown[] }>
+	clearQueue: () => Promise<void>
+
+	// History methods
+	getHistory: (promptId?: string) => Promise<Record<string, HistoryItem>>
+	clearHistory: (promptIds?: string[]) => Promise<void>
+
+	// Image methods
+	uploadImage: (file: File, subfolder?: string, overwrite?: boolean) => Promise<ImageInfo>
+	getImageUrl: (filename: string, subfolder?: string, type?: 'output' | 'input' | 'temp') => string
+
+	// System methods
+	getSystemStats: () => Promise<SystemStats>
+	freeMemory: (unloadModels?: boolean, freeMemoryFlag?: boolean) => Promise<void>
+	getExtensions: () => Promise<string[]>
+	getEmbeddings: () => Promise<string[]>
 }
 
 export function useComfyAPI(): UseComfyAPIReturn {
 	const [isConnected, setIsConnected] = useState(false)
 	const [isConnecting, setIsConnecting] = useState(false)
 	const [nodeDefinitions, setNodeDefinitions] = useState<Record<string, NodeDefinition>>({})
+	const [previewImage, setPreviewImage] = useState<string | null>(null)
 
 	const wsRef = useRef<WebSocket | null>(null)
 	const clientIdRef = useRef<string>(crypto.randomUUID())
 	const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+	const previewUrlRef = useRef<string | null>(null)
 
 	const { addToast } = useToast()
 	const { setProgress, completeRunning, failRunning, addToQueue, startNext } = useQueueStore()
@@ -39,8 +66,20 @@ export function useComfyAPI(): UseComfyAPIReturn {
 
 	const handleMessage = useCallback(
 		(event: MessageEvent) => {
+			// Handle binary messages (preview images)
+			if (event.data instanceof Blob) {
+				// Revoke previous preview URL to prevent memory leaks
+				if (previewUrlRef.current) {
+					URL.revokeObjectURL(previewUrlRef.current)
+				}
+				const url = URL.createObjectURL(event.data)
+				previewUrlRef.current = url
+				setPreviewImage(url)
+				return
+			}
+
 			try {
-				const message: ComfyUIMessage = JSON.parse(event.data)
+				const message = JSON.parse(event.data)
 
 				switch (message.type) {
 					case 'progress':
@@ -56,13 +95,35 @@ export function useComfyAPI(): UseComfyAPIReturn {
 						if (message.data.node === null) {
 							// Execution complete
 							completeRunning()
+							// Clear preview image
+							if (previewUrlRef.current) {
+								URL.revokeObjectURL(previewUrlRef.current)
+								previewUrlRef.current = null
+								setPreviewImage(null)
+							}
 							// Start next item if any
 							startNext()
 						}
 						break
 
 					case 'executed':
-						// Node execution completed
+						// Node execution completed - could store output here if needed
+						break
+
+					case 'execution_start':
+						// Workflow execution started
+						break
+
+					case 'execution_success':
+						// Workflow completed successfully
+						break
+
+					case 'execution_cached':
+						// Nodes were cached and skipped
+						break
+
+					case 'execution_interrupted':
+						addToast({ type: 'warning', message: 'Execution interrupted' })
 						break
 
 					case 'execution_error':
@@ -71,6 +132,10 @@ export function useComfyAPI(): UseComfyAPIReturn {
 							type: 'error',
 							message: `Execution failed: ${message.data.exception_message}`
 						})
+						break
+
+					case 'status':
+						// Queue status update
 						break
 				}
 			} catch (err) {
@@ -126,6 +191,13 @@ export function useComfyAPI(): UseComfyAPIReturn {
 			wsRef.current = null
 		}
 
+		// Clean up preview URL
+		if (previewUrlRef.current) {
+			URL.revokeObjectURL(previewUrlRef.current)
+			previewUrlRef.current = null
+			setPreviewImage(null)
+		}
+
 		setIsConnected(false)
 	}, [])
 
@@ -144,7 +216,7 @@ export function useComfyAPI(): UseComfyAPIReturn {
 
 			if (!response.ok) {
 				const error = await response.json()
-				throw new Error(error.error || 'Failed to queue prompt')
+				throw new Error(error.error?.message || error.error || 'Failed to queue prompt')
 			}
 
 			const data = await response.json()
@@ -167,7 +239,7 @@ export function useComfyAPI(): UseComfyAPIReturn {
 		try {
 			await fetch(`${API_BASE}/interrupt`, { method: 'POST' })
 			addToast({ type: 'warning', message: 'Execution interrupted' })
-		} catch (err) {
+		} catch {
 			addToast({ type: 'error', message: 'Failed to interrupt' })
 		}
 	}, [addToast])
@@ -184,6 +256,95 @@ export function useComfyAPI(): UseComfyAPIReturn {
 		}
 	}, [])
 
+	// Queue methods
+	const getQueue = useCallback(async () => {
+		const response = await fetch(`${API_BASE}/queue`)
+		if (!response.ok) throw new Error('Failed to get queue')
+		return response.json()
+	}, [])
+
+	const clearQueue = useCallback(async () => {
+		await fetch(`${API_BASE}/queue`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ clear: true })
+		})
+	}, [])
+
+	// History methods
+	const getHistory = useCallback(async (promptId?: string): Promise<Record<string, HistoryItem>> => {
+		const url = promptId ? `${API_BASE}/history/${promptId}` : `${API_BASE}/history`
+		const response = await fetch(url)
+		if (!response.ok) throw new Error('Failed to get history')
+		return response.json()
+	}, [])
+
+	const clearHistory = useCallback(async (promptIds?: string[]) => {
+		await fetch(`${API_BASE}/history`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(promptIds ? { delete: promptIds } : { clear: true })
+		})
+	}, [])
+
+	// Image methods
+	const uploadImage = useCallback(
+		async (file: File, subfolder = '', overwrite = false): Promise<ImageInfo> => {
+			const formData = new FormData()
+			formData.append('image', file)
+			formData.append('type', 'input')
+			formData.append('subfolder', subfolder)
+			formData.append('overwrite', String(overwrite))
+
+			const response = await fetch(`${API_BASE}/upload/image`, {
+				method: 'POST',
+				body: formData
+			})
+
+			if (!response.ok) throw new Error('Failed to upload image')
+			return response.json()
+		},
+		[]
+	)
+
+	const getImageUrl = useCallback(
+		(filename: string, subfolder = '', type: 'output' | 'input' | 'temp' = 'output'): string => {
+			const params = new URLSearchParams({ filename, subfolder, type })
+			return `${API_BASE}/view?${params}`
+		},
+		[]
+	)
+
+	// System methods
+	const getSystemStats = useCallback(async (): Promise<SystemStats> => {
+		const response = await fetch(`${API_BASE}/system_stats`)
+		if (!response.ok) throw new Error('Failed to get system stats')
+		return response.json()
+	}, [])
+
+	const freeMemory = useCallback(async (unloadModels = true, freeMemoryFlag = true) => {
+		await fetch(`${API_BASE}/free`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				unload_models: unloadModels,
+				free_memory: freeMemoryFlag
+			})
+		})
+	}, [])
+
+	const getExtensions = useCallback(async (): Promise<string[]> => {
+		const response = await fetch(`${API_BASE}/extensions`)
+		if (!response.ok) throw new Error('Failed to get extensions')
+		return response.json()
+	}, [])
+
+	const getEmbeddings = useCallback(async (): Promise<string[]> => {
+		const response = await fetch(`${API_BASE}/embeddings`)
+		if (!response.ok) throw new Error('Failed to get embeddings')
+		return response.json()
+	}, [])
+
 	// Cleanup on unmount
 	useEffect(() => {
 		return () => {
@@ -192,13 +353,37 @@ export function useComfyAPI(): UseComfyAPIReturn {
 	}, [disconnect])
 
 	return {
+		// Connection state
 		isConnected,
 		isConnecting,
 		nodeDefinitions,
+		previewImage,
+
+		// Connection methods
 		connect,
 		disconnect,
+
+		// Workflow methods
 		queuePrompt,
 		interrupt,
-		fetchNodeDefinitions
+		fetchNodeDefinitions,
+
+		// Queue methods
+		getQueue,
+		clearQueue,
+
+		// History methods
+		getHistory,
+		clearHistory,
+
+		// Image methods
+		uploadImage,
+		getImageUrl,
+
+		// System methods
+		getSystemStats,
+		freeMemory,
+		getExtensions,
+		getEmbeddings
 	}
 }

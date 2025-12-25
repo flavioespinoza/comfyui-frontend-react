@@ -10,7 +10,13 @@
       "Bash(npm install:*)",
       "Bash(npm run build:*)",
       "Bash(npx tsc:*)",
-      "Bash(gh pr create:*)"
+      "Bash(gh pr create:*)",
+      "Bash(source ~/.nvm/nvm.sh)",
+      "Bash(nvm use:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "Bash(lsof:*)",
+      "Bash(nvm list:*)"
     ]
   }
 }
