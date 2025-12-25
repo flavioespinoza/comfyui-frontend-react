@@ -1,104 +1,110 @@
+// src/hooks/useKeyboardShortcuts.ts
+// Date: December 25, 2025
+// Version: v1
+
 'use client'
 
-// Keyboard shortcut handling hook
+import { useEffect, useCallback } from 'react'
+import { useGraphStore } from '@/stores/graphStore'
+import { useUIStore } from '@/stores/uiStore'
+import { useComfyAPI } from './useComfyAPI'
 
-import { useEffect, useCallback, useRef } from 'react'
-import { DEFAULT_SHORTCUTS, type KeyboardShortcut, type ShortcutBinding } from '@/types/shortcuts'
+export function useKeyboardShortcuts() {
+	const { undo, redo, deleteNodes, selectedNodeIds, copySelection, paste } = useGraphStore()
+	const { toggleQueuePanel, toggleSidebar } = useUIStore()
+	const { queuePrompt, interrupt } = useComfyAPI()
 
-interface ShortcutHandlers {
-  [actionId: string]: () => void
-}
+	const handleKeyDown = useCallback(
+		(event: KeyboardEvent) => {
+			// Skip if user is typing in an input
+			const target = event.target as HTMLElement
+			if (
+				target.tagName === 'INPUT' ||
+				target.tagName === 'TEXTAREA' ||
+				target.isContentEditable
+			) {
+				return
+			}
 
-interface UseKeyboardShortcutsOptions {
-  shortcuts?: KeyboardShortcut[]
-  handlers: ShortcutHandlers
-  enabled?: boolean
-}
+			const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
+			const cmdOrCtrl = isMac ? event.metaKey : event.ctrlKey
 
-function parseShortcut(shortcutString: string): ShortcutBinding {
-  const parts = shortcutString.toLowerCase().split('+')
-  const key = parts[parts.length - 1]
+			// Undo: Ctrl/Cmd + Z
+			if (cmdOrCtrl && !event.shiftKey && event.key === 'z') {
+				event.preventDefault()
+				undo()
+				return
+			}
 
-  return {
-    key,
-    ctrl: parts.includes('ctrl') || parts.includes('control'),
-    alt: parts.includes('alt'),
-    shift: parts.includes('shift'),
-    meta: parts.includes('meta') || parts.includes('cmd') || parts.includes('command'),
-  }
-}
+			// Redo: Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y
+			if (cmdOrCtrl && (event.shiftKey && event.key === 'z' || event.key === 'y')) {
+				event.preventDefault()
+				redo()
+				return
+			}
 
-function matchesBinding(event: KeyboardEvent, binding: ShortcutBinding): boolean {
-  const key = event.key.toLowerCase()
+			// Copy: Ctrl/Cmd + C
+			if (cmdOrCtrl && event.key === 'c') {
+				event.preventDefault()
+				copySelection()
+				return
+			}
 
-  // Handle special keys
-  const eventKey =
-    key === ' ' ? 'space' : key === 'escape' ? 'esc' : key === 'arrowup' ? 'up' : key === 'arrowdown' ? 'down' : key === 'arrowleft' ? 'left' : key === 'arrowright' ? 'right' : key
+			// Paste: Ctrl/Cmd + V
+			if (cmdOrCtrl && event.key === 'v') {
+				event.preventDefault()
+				paste({ x: 100, y: 100 })
+				return
+			}
 
-  return (
-    eventKey === binding.key &&
-    event.ctrlKey === (binding.ctrl ?? false) &&
-    event.altKey === (binding.alt ?? false) &&
-    event.shiftKey === (binding.shift ?? false) &&
-    event.metaKey === (binding.meta ?? false)
-  )
-}
+			// Delete: Delete or Backspace
+			if (event.key === 'Delete' || event.key === 'Backspace') {
+				event.preventDefault()
+				deleteNodes(Array.from(selectedNodeIds))
+				return
+			}
 
-export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions): void {
-  const { shortcuts = DEFAULT_SHORTCUTS, handlers, enabled = true } = options
+			// Queue: Ctrl/Cmd + Enter
+			if (cmdOrCtrl && event.key === 'Enter') {
+				event.preventDefault()
+				queuePrompt()
+				return
+			}
 
-  const handlersRef = useRef(handlers)
-  handlersRef.current = handlers
+			// Interrupt: Escape
+			if (event.key === 'Escape') {
+				interrupt()
+				return
+			}
 
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      if (!enabled) return
+			// Toggle Queue Panel: Q
+			if (event.key === 'q' && !cmdOrCtrl) {
+				toggleQueuePanel()
+				return
+			}
 
-      // Skip if user is typing in an input
-      const target = event.target as HTMLElement
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
-        return
-      }
+			// Toggle Sidebar: B
+			if (event.key === 'b' && !cmdOrCtrl) {
+				toggleSidebar()
+				return
+			}
+		},
+		[
+			undo,
+			redo,
+			copySelection,
+			paste,
+			deleteNodes,
+			selectedNodeIds,
+			queuePrompt,
+			interrupt,
+			toggleQueuePanel,
+			toggleSidebar
+		]
+	)
 
-      for (const shortcut of shortcuts) {
-        if (!shortcut.enabled) continue
-
-        for (const keyCombo of shortcut.keys) {
-          const binding = parseShortcut(keyCombo)
-          if (matchesBinding(event, binding)) {
-            const handler = handlersRef.current[shortcut.action]
-            if (handler) {
-              event.preventDefault()
-              event.stopPropagation()
-              handler()
-              return
-            }
-          }
-        }
-      }
-    },
-    [shortcuts, enabled]
-  )
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
-}
-
-// Hook to get formatted shortcut string for display
-export function useShortcutDisplay(actionId: string, shortcuts = DEFAULT_SHORTCUTS): string | null {
-  const shortcut = shortcuts.find((s) => s.action === actionId)
-  if (!shortcut || shortcut.keys.length === 0) return null
-
-  return shortcut.keys[0]
-    .replace(/ctrl/i, '⌃')
-    .replace(/alt/i, '⌥')
-    .replace(/shift/i, '⇧')
-    .replace(/meta|cmd|command/i, '⌘')
-    .replace(/\+/g, '')
+	useEffect(() => {
+		window.addEventListener('keydown', handleKeyDown)
+		return () => window.removeEventListener('keydown', handleKeyDown)
+	}, [handleKeyDown])
 }

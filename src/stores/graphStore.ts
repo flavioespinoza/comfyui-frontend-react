@@ -79,11 +79,13 @@ export const useGraphStore = create<GraphState>()(
           state.selectedNodeIds.delete(id)
         })
         // Remove edges connected to deleted nodes
-        state.edges.forEach((edge, edgeId) => {
+        const edgesToDelete: string[] = []
+        state.edges.forEach((edge: GraphEdge, edgeId: string) => {
           if (ids.includes(edge.source) || ids.includes(edge.target)) {
-            state.edges.delete(edgeId)
+            edgesToDelete.push(edgeId)
           }
         })
+        edgesToDelete.forEach((edgeId: string) => state.edges.delete(edgeId))
       })
     },
 

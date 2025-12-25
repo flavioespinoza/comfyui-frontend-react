@@ -1,34 +1,26 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
+// src/app/layout.tsx
+// Date: December 25, 2025
+// Version: v2
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import type { Metadata } from 'next'
+import { ToastProvider } from '@/components/ui/Toast'
+import './globals.css'
 
 export const metadata: Metadata = {
-  title: "ComfyUI Frontend",
-  description: "Modern React frontend for ComfyUI",
-};
+	title: 'ComfyUI',
+	description: 'ComfyUI - Node-based Stable Diffusion Interface'
+}
 
 export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
-      >
-        {children}
-      </body>
-    </html>
-  );
+	children
+}: {
+	children: React.ReactNode
+}) {
+	return (
+		<html lang="en" className="dark">
+			<body className="min-h-screen bg-comfy-bg text-comfy-text antialiased">
+				<ToastProvider>{children}</ToastProvider>
+			</body>
+		</html>
+	)
 }

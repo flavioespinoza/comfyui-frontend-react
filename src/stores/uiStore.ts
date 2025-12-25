@@ -56,8 +56,8 @@ export const useUIStore = create<UIState>()(
         set({ queuePanelOpen: open })
       },
 
-      openModal: (modal, data = null) => {
-        set({ activeModal: modal, modalData: data })
+      openModal: (modal, data) => {
+        set({ activeModal: modal, modalData: data ?? null })
       },
 
       closeModal: () => {

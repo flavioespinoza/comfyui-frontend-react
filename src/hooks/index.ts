@@ -1,3 +1,3 @@
 export { useComfyAPI } from './useComfyAPI'
-export { useKeyboardShortcuts, useShortcutDisplay } from './useKeyboardShortcuts'
+export { useKeyboardShortcuts } from './useKeyboardShortcuts'
 export { useWorkflow } from './useWorkflow'
