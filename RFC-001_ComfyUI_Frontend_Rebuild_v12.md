@@ -59,7 +59,7 @@ The August 2024 migration from vanilla JavaScript to Vue/TypeScript was a step f
 
 ### The Ask
 
-I propose investing in a complete rebuild using React/Next.js—not because Vue is inherently inferior, but because:
+I propose investing in a complete rebuild using React/Next.js3 because:
 
 1. **Ecosystem**: React's npm downloads are approximately 7x higher than Vue's [[npmtrends](https://npmtrends.com/react-vs-vue)]
 2. **Talent**: React developers outnumber Vue developers ~5:1 in job postings [[devjobsscanner](https://www.devjobsscanner.com/)]
